@@ -144,21 +144,29 @@ extras_text = st.text_area("Extras", height=140, placeholder="<director name>=Ja
 # 7) Logo upload
 logo_file = st.file_uploader("Upload logo (.png/.jpg)", type=["png","jpg","jpeg"])
 
-master_path = st.text_input("Enter master templates folder path (local machine)")
-import os
+import streamlit as st
 from pathlib import Path
 
+# 1️⃣ Ask user for local master folder path
+master_path = st.text_input("Enter master templates folder path (local machine)")
+
 services_options = []
+# 2️⃣ Only populate options if the path exists
 if master_path and Path(master_path).exists():
     services_options = sorted([
         f.name for f in Path(master_path).iterdir() if f.is_dir() or f.is_file()
     ])
 
-services = st.multiselect(
-    "Select services (folders/files) to process",
-    options=services_options,
-    default=services_options
-)
+# 3️⃣ Render multiselect only if we have options
+if services_options:
+    services = st.multiselect(
+        "Select services (folders/files) to process",
+        options=services_options,
+        default=services_options
+    )
+else:
+    st.info("Enter a valid folder path to enable service selection.")
+
 
 
 
