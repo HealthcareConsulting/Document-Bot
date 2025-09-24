@@ -144,27 +144,20 @@ extras_text = st.text_area("Extras", height=140, placeholder="<director name>=Ja
 # 7) Logo upload
 logo_file = st.file_uploader("Upload logo (.png/.jpg)", type=["png","jpg","jpeg"])
 
-import streamlit as st
-from pathlib import Path
-
-if 'services_loaded' not in st.session_state:
-    st.session_state.services_loaded = False
-
-master_path = st.text_input("Enter master templates folder path (local machine)")
-
-if master_path and Path(master_path).exists() and not st.session_state.services_loaded:
-    st.session_state.services_options = sorted([
-        f.name for f in Path(master_path).iterdir() if f.is_dir() or f.is_file()
-    ])
-    st.session_state.services_loaded = True
-    st.experimental_rerun()  # forces page to refresh so multiselect becomes active
-
-if st.session_state.get('services_options'):
+master_path_input = st.text_input("Enter master templates folder path (local machine)")
+master_path = Path(master_path_input.strip())
+services_options = []
+if master_path.exists() and master_path.is_dir():
+    services_options = sorted([f.name for f in master_path.iterdir() if f.is_dir()])
+if services_options:
     services = st.multiselect(
-        "Select services (folders/files) to process",
-        options=st.session_state.services_options,
-        default=st.session_state.services_options
+        "Select services (folders) to process",
+        options=services_options,
+        default=services_options
     )
+else:
+    st.info("Enter a valid folder path to load services.")
+
 
 
 
