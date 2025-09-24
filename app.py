@@ -2,9 +2,10 @@
 
 # 1) Imports
 import streamlit as st
-import importlib.util, sys, json
+import importlib.util, sys, json, zipfile
 from pathlib import Path
 from datetime import datetime
+import shutil
 
 # 2) Load the HYBRID engine (safe text + perfect logo + cover/textbox rescue)
 spec = importlib.util.spec_from_file_location(
@@ -22,79 +23,49 @@ st.title("🗂️ NDIS Doc Bot — Single Client (Hybrid)")
 # 4) Sidebar: locations & options
 with st.sidebar:
     st.header("Locations")
-    
-    # Input for master folder path
+    default_out = (Path.cwd() / "OUTPUT").resolve()
+
+    # Master folder input (local path)
     master_path_input = st.text_input(
         "Enter master templates folder path (local machine)",
-        value=str(Path.cwd() / "MASTER DOCUMENTS")
+        value=""
     )
-    master_path = Path(master_path_input.strip())  # Remove leading/trailing spaces
+
+    # Normalize path: remove leading/trailing spaces, expand ~, resolve
+    master_path = Path(master_path_input.strip()).expanduser()
     
-    # Input for output folder
-    out_root_input = st.text_input(
-        "Output folder",
-        value=str(Path.cwd() / "OUTPUT")
-    )
-    out_root = Path(out_root_input.strip())
-
-    # Display info if path invalid
-    if not master_path.exists() or not master_path.is_dir():
-        st.warning("⚠️ Enter a valid master templates folder path to load services.")
-
-    # Fetch service folders only if path exists
-    services_options = []
-    if master_path.exists() and master_path.is_dir():
-        services_options = sorted([f.name for f in master_path.iterdir() if f.is_dir()])
+    out_root = st.text_input("Output folder", value=str(default_out))
     
-    # Multiselect for services (enabled only if options exist)
-    if services_options:
-        services = st.multiselect(
-            "Select services (folders) to process",
-            options=services_options,
-            default=services_options
-        )
-    else:
-        services = []
-        st.info("Services will appear here once a valid folder path is entered.")
-
     st.header("Logo Settings")
     st.caption("💡 Control logo sizes for different document areas")
     
-    # Initialize session state for logo width if not exists
     if 'logo_width' not in st.session_state:
         st.session_state.logo_width = 25.0
     
-    # Display current size prominently
     st.metric("Current Logo Size", f"{st.session_state.logo_width}mm")
     
-    # Quick size presets with forced refresh
-    st.caption("**Quick presets:**")
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("Small\n(15mm)", help="Best for headers", key="small_btn"):
+        if st.button("Small\n(15mm)", key="small_btn"):
             st.session_state.logo_width = 15.0
             st.rerun()
     with col2:
-        if st.button("Medium\n(30mm)", help="Good balance", key="medium_btn"):
+        if st.button("Medium\n(30mm)", key="medium_btn"):
             st.session_state.logo_width = 30.0
             st.rerun()
     with col3:
-        if st.button("Large\n(45mm)", help="Cover pages", key="large_btn"):
+        if st.button("Large\n(45mm)", key="large_btn"):
             st.session_state.logo_width = 45.0
             st.rerun()
     
-    # Manual size input with immediate update
     new_logo_width = st.number_input(
         "Logo width (mm)", 
         min_value=5.0, 
         max_value=80.0, 
         value=float(st.session_state.logo_width),
         step=1.0,
-        help="Size applies to both header and cover logos",
         key="logo_width_input"
     )
-    
-    # Update session state when slider changes
     if abs(new_logo_width - st.session_state.logo_width) > 0.1:
         st.session_state.logo_width = float(new_logo_width)
         st.rerun()
@@ -111,15 +82,18 @@ with st.sidebar:
     
     st.header("Options")
     dry_run = st.checkbox("Dry run (no docs written)", value=False)
-    st.caption("Tip: Keep defaults if the app lives next to your templates.")
 
 # 5) Helpers
+def discover_services(master: Path):
+    if not master.exists() or not master.is_dir():
+        return []
+    return sorted([c.name for c in master.iterdir() if c.is_dir() or c.is_file()])
+
 def build_data_dict(basics: dict, extras_text: str):
     data = {}
     for k, v in basics.items():
         if v:
             data[k] = v
-    # extras lines as "<key>=value"
     for line in (extras_text or "").splitlines():
         if "=" in line:
             key, val = line.split("=", 1)
@@ -132,7 +106,6 @@ def build_data_dict(basics: dict, extras_text: str):
     return data
 
 def title_case_input(label, key):
-    """Streamlit text input that always displays and stores title case."""
     def _to_title():
         if st.session_state[key]:
             st.session_state[key] = st.session_state[key].title()
@@ -160,12 +133,22 @@ extras_text = st.text_area("Extras", height=140, placeholder="<director name>=Ja
 # 7) Logo upload
 logo_file = st.file_uploader("Upload logo (.png/.jpg)", type=["png","jpg","jpeg"])
 
-# 8) Output naming
+# 8) Services selection
+services_options = discover_services(master_path)
+if not services_options and master_path_input.strip():
+    st.warning(f"⚠️ No folders/files found in: {master_path}")
+services = st.multiselect(
+    "Select services (folders/files)",
+    options=services_options,
+    default=services_options
+)
+
+# 9) Output naming
 client_label = st.text_input("Output subfolder name", value=f"CLIENT-{datetime.now().strftime('%Y-%m-%d')}")
 
 st.divider()
 
-# Show current settings before processing
+# Show current settings
 st.info(f"📊 **Current Settings:** Logo size: {st.session_state.logo_width}mm | Dry run: {dry_run}")
 
 colA, colB = st.columns([1,1])
@@ -173,17 +156,17 @@ go = colA.button("Generate filled documents" if not dry_run else "Preview (Dry r
 reset = colB.button("Reset form")
 
 if reset:
-    # Reset session state
     st.session_state.logo_width = 25.0
     st.rerun()
 
-# 9) Run pipeline
+# 10) Run pipeline
 if go:
-    out_client_dir = out_root / client_label
-    out_root.mkdir(parents=True, exist_ok=True)
-    workdir = out_root / "_ui_work"
+    out_root_p = Path(out_root)
+    out_client_dir = out_root_p / client_label
+    out_root_p.mkdir(parents=True, exist_ok=True)
+    workdir = out_root_p / "_ui_work"
     if workdir.exists():
-        import shutil; shutil.rmtree(workdir)
+        shutil.rmtree(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
 
     # Build data.json
@@ -212,6 +195,9 @@ if go:
 
     services_csv = ",".join(services) if services else ""
 
+    current_size = float(st.session_state.logo_width)
+    st.info(f"📄 Processing with logo size: **{current_size}mm**")
+    
     with st.spinner("Processing…"):
         report_path = ndis_cli.run_pipeline(
             master_src=master_path,
@@ -220,27 +206,23 @@ if go:
             logo=tmp_logo_path,
             services_csv=services_csv,
             dry_run=dry_run,
-            logo_width_mm=float(st.session_state.logo_width),
+            logo_width_mm=current_size,
         )
 
-    st.success(f"Done! Logo size used: {st.session_state.logo_width}mm")
+    st.success(f"Done! Logo size used: {current_size}mm")
 
-    # CSV download
     if report_path.exists():
         with open(report_path, "rb") as f:
             st.download_button("Download report CSV", data=f, file_name=report_path.name, mime="text/csv")
 
-    # Zip download (live runs)
     if not dry_run and out_client_dir.exists():
         out_zip = out_client_dir.with_suffix(".zip")
         if out_zip.exists():
             out_zip.unlink()
-        import shutil
         shutil.make_archive(str(out_client_dir), "zip", root_dir=out_client_dir)
         with open(out_zip, "rb") as fz:
             st.download_button("Download filled documents (.zip)", data=fz, file_name=out_zip.name, mime="application/zip")
 
-    # Show data.json used
     st.subheader("data.json used")
     st.code(tmp_data_json.read_text(encoding="utf-8"), language="json")
 
