@@ -144,23 +144,22 @@ extras_text = st.text_area("Extras", height=140, placeholder="<director name>=Ja
 # 7) Logo upload
 logo_file = st.file_uploader("Upload logo (.png/.jpg)", type=["png","jpg","jpeg"])
 
-# Upload master folder as zip
-master_zip_file = st.file_uploader("Select master folder (.zip) from your local machine", type=["zip"])
+master_path = st.text_input("Enter master templates folder path (local machine)")
+import os
+from pathlib import Path
 
 services_options = []
-if master_zip_file is not None:
-    import zipfile
-    import io
-
-    with zipfile.ZipFile(io.BytesIO(master_zip_file.read())) as zf:
-        top = {name.split("/")[0] for name in zf.namelist() if "/" in name}
-        services_options = sorted(list(top))
+if master_path and Path(master_path).exists():
+    services_options = sorted([
+        f.name for f in Path(master_path).iterdir() if f.is_dir() or f.is_file()
+    ])
 
 services = st.multiselect(
-    "Select services (folders)",
+    "Select services (folders/files) to process",
     options=services_options,
     default=services_options
 )
+
 
 
 
