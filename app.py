@@ -144,26 +144,19 @@ extras_text = st.text_area("Extras", height=140, placeholder="<director name>=Ja
 # 7) Logo upload
 logo_file = st.file_uploader("Upload logo (.png/.jpg)", type=["png","jpg","jpeg"])
 
-# 8) Services
-# services_options = discover_services(master_path)
-# services = st.multiselect("Select services (folders)", options=services_options, default=services_options)
-# 8) Services
-services_options = discover_services(master_path)
-
-# Fallback if folder/zip is missing or empty (keeps multiselect enabled)
-if not services_options:
-    services_options = ["No services available"]
-
-# Initialize session state for services selection if not exists
-if "selected_services" not in st.session_state:
-    st.session_state["selected_services"] = []
-
-services = st.multiselect(
-    "Select services (folders)",
-    options=services_options,
-    default=services_options if services_options[0] != "No services available" else st.session_state["selected_services"],
-    key="selected_services"
+# 8) Services - dynamic from local master path
+master_path = st.text_input(
+    "Enter master templates folder path",
+    value=str(Path.cwd() / "MASTER DOCUMENTS")  # or default path you want
 )
+
+services_options = discover_services(master_path)
+services = st.multiselect(
+    "Select services (folders)", 
+    options=services_options, 
+    default=services_options
+)
+
 
 
 # 9) Output naming
