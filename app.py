@@ -2,7 +2,7 @@
 
 # 1) Imports
 import streamlit as st
-import importlib.util, sys, json, zipfile
+import importlib.util, sys, json
 from pathlib import Path
 from datetime import datetime
 
@@ -22,12 +22,41 @@ st.title("🗂️ NDIS Doc Bot — Single Client (Hybrid)")
 # 4) Sidebar: locations & options
 with st.sidebar:
     st.header("Locations")
-    default_master = (Path.cwd() / "MASTER DOCUMENTS").resolve()
-    default_out = (Path.cwd() / "OUTPUT").resolve()
-
-    master_path = st.text_input("Master templates (folder or .zip)", value=str(default_master))
-    out_root = st.text_input("Output folder", value=str(default_out))
     
+    # Input for master folder path
+    master_path_input = st.text_input(
+        "Enter master templates folder path (local machine)",
+        value=str(Path.cwd() / "MASTER DOCUMENTS")
+    )
+    master_path = Path(master_path_input.strip())  # Remove leading/trailing spaces
+    
+    # Input for output folder
+    out_root_input = st.text_input(
+        "Output folder",
+        value=str(Path.cwd() / "OUTPUT")
+    )
+    out_root = Path(out_root_input.strip())
+
+    # Display info if path invalid
+    if not master_path.exists() or not master_path.is_dir():
+        st.warning("⚠️ Enter a valid master templates folder path to load services.")
+
+    # Fetch service folders only if path exists
+    services_options = []
+    if master_path.exists() and master_path.is_dir():
+        services_options = sorted([f.name for f in master_path.iterdir() if f.is_dir()])
+    
+    # Multiselect for services (enabled only if options exist)
+    if services_options:
+        services = st.multiselect(
+            "Select services (folders) to process",
+            options=services_options,
+            default=services_options
+        )
+    else:
+        services = []
+        st.info("Services will appear here once a valid folder path is entered.")
+
     st.header("Logo Settings")
     st.caption("💡 Control logo sizes for different document areas")
     
@@ -85,22 +114,12 @@ with st.sidebar:
     st.caption("Tip: Keep defaults if the app lives next to your templates.")
 
 # 5) Helpers
-def discover_services(master: Path):
-    p = Path(master)
-    if p.is_dir():
-        return sorted([c.name for c in p.iterdir() if c.is_dir()])
-    if p.suffix.lower() == ".zip" and p.exists():
-        with zipfile.ZipFile(p, "r") as zf:
-            top = {name.split("/")[0] for name in zf.namelist() if "/" in name}
-            return sorted(list(top))
-    return []
-
 def build_data_dict(basics: dict, extras_text: str):
     data = {}
     for k, v in basics.items():
         if v:
             data[k] = v
-    # extras lines as "<key>=value" (angle brackets optional)
+    # extras lines as "<key>=value"
     for line in (extras_text or "").splitlines():
         if "=" in line:
             key, val = line.split("=", 1)
@@ -111,16 +130,13 @@ def build_data_dict(basics: dict, extras_text: str):
                     k = f"<{k.strip('<>')}>"
                 data[k] = v
     return data
+
 def title_case_input(label, key):
     """Streamlit text input that always displays and stores title case."""
-
     def _to_title():
         if st.session_state[key]:
             st.session_state[key] = st.session_state[key].title()
-
     return st.text_input(label, key=key, on_change=_to_title)
-
-
 
 # 6) Client details
 st.subheader("Client details")
@@ -144,27 +160,7 @@ extras_text = st.text_area("Extras", height=140, placeholder="<director name>=Ja
 # 7) Logo upload
 logo_file = st.file_uploader("Upload logo (.png/.jpg)", type=["png","jpg","jpeg"])
 
-master_path_input = st.text_input("Enter master templates folder path (local machine)")
-master_path = Path(master_path_input.strip())
-services_options = []
-if master_path.exists() and master_path.is_dir():
-    services_options = sorted([f.name for f in master_path.iterdir() if f.is_dir()])
-if services_options:
-    services = st.multiselect(
-        "Select services (folders) to process",
-        options=services_options,
-        default=services_options
-    )
-else:
-    st.info("Enter a valid folder path to load services.")
-
-
-
-
-
-
-
-# 9) Output naming
+# 8) Output naming
 client_label = st.text_input("Output subfolder name", value=f"CLIENT-{datetime.now().strftime('%Y-%m-%d')}")
 
 st.divider()
@@ -181,18 +177,11 @@ if reset:
     st.session_state.logo_width = 25.0
     st.rerun()
 
-# 10) Run pipeline
+# 9) Run pipeline
 if go:
-    master = Path(master_path)
-    out_root_p = Path(out_root)
-    out_client_dir = out_root_p / client_label
-
-    if not master.exists():
-        st.error("Master path does not exist. Fix the path in the sidebar.")
-        st.stop()
-
-    out_root_p.mkdir(parents=True, exist_ok=True)
-    workdir = out_root_p / "_ui_work"
+    out_client_dir = out_root / client_label
+    out_root.mkdir(parents=True, exist_ok=True)
+    workdir = out_root / "_ui_work"
     if workdir.exists():
         import shutil; shutil.rmtree(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -223,25 +212,18 @@ if go:
 
     services_csv = ",".join(services) if services else ""
 
-    # Display processing info with explicit value
-    current_size = float(st.session_state.logo_width)
-    st.info(f"📄 Processing with logo size: **{current_size}mm**")
-    st.write(f"🔍 Debug: Session state value = {st.session_state.logo_width}")
-    st.write(f"🔍 Debug: Converting to float = {current_size}")
-    
     with st.spinner("Processing…"):
-        # Explicitly pass the current size
         report_path = ndis_cli.run_pipeline(
-            master_src=master,
+            master_src=master_path,
             out_dir=out_client_dir,
             data_json=tmp_data_json,
             logo=tmp_logo_path,
             services_csv=services_csv,
             dry_run=dry_run,
-            logo_width_mm=current_size,  # Use the explicit current_size variable
+            logo_width_mm=float(st.session_state.logo_width),
         )
 
-    st.success(f"Done! Logo size used: {current_size}mm")
+    st.success(f"Done! Logo size used: {st.session_state.logo_width}mm")
 
     # CSV download
     if report_path.exists():
@@ -262,5 +244,4 @@ if go:
     st.subheader("data.json used")
     st.code(tmp_data_json.read_text(encoding="utf-8"), language="json")
 
-# Status message
-st.caption(f"✅ Safe mode active | Current logo size: {st.session_state.logo_width}mm | Header logos capped at 20mm for layout safety")
+st.caption(f"✅ Safe mode active | Current logo size: {st.session_state.logo_width}mm")
